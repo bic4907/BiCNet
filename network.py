@@ -3,60 +3,57 @@ import torch.nn as nn
 
 
 class Actor(nn.Module):
-    def __init__(self, s_dim, a_dim, num_agents, is_cuda=True):
+    def __init__(self, s_dim, a_dim, n_agents):
         super(Actor, self).__init__()
 
         self.s_dim = s_dim
         self.a_dim = a_dim
+        self.n_agents = n_agents
 
         # input (batch, s_dim) output (batch, 300)
         self.prev_dense = DenseNet(s_dim, 200, 200, output_activation=None, norm_in=True)
-        # input (num_agents, batch, 200) output (num_agents, batch, num_agents * 2)
-        self.comm_net = LSTMNet(num_agents, num_agents, num_layers=1)
+        # input (num_agents, batch, 200) output (num_agents, batch, num_agents * 2)\
+        self.comm_net = LSTMNet(200, n_agents, num_layers=1)
         # input (batch, 2) output (batch, a_dim)
-        self.post_dense = DenseNet(2, 32, a_dim)
+        self.post_dense = DenseNet(6, 32, a_dim, output_activation=nn.Tanh)
 
     def forward(self, x):
+
+        x = x.view(-1, self.s_dim)
         x = self.prev_dense(x)
-        x = x.transpose(0, 1)
+        x = x.reshape(-1, self.n_agents, 200)
         x = self.comm_net(x)
-        x = x.transpose(1, 0) # (batch, num_agnets, num_agents * 2)
-        x = x.reshape(2)
-        x = x.post_dense(x)
+        x = x.reshape(-1, 6)
+        x = self.post_dense(x)
+        x = x.view(-1, self.n_agents, self.a_dim)
         return x
 
 
 class Critic(nn.Module):
-    def __init__(self, s_dim, a_dim, num_agent):
+    def __init__(self, s_dim, a_dim, n_agents):
         super(Critic, self).__init__()
 
-        self.num_agent = num_agent
         self.s_dim = s_dim
         self.a_dim = a_dim
+        self.n_agents = n_agents
 
-        self.norm1 = nn.BatchNorm1d(s_dim * num_agent)
-        self.fc1 = nn.Linear(s_dim * num_agent, 64)
-        self.fc2 = nn.Linear(64 + self.a_dim * num_agent, 64)
-        self.fc3 = nn.Linear(64, 1)
-        self.relu = nn.ReLU()
-
-        self.norm1.weight.data.fill_(1)
-        self.norm1.bias.data.fill_(0)
-
-        self.fc3.weight.data.uniform_(-0.003, 0.003)
+        # input (batch, s_dim) output (batch, 300)
+        self.prev_dense = DenseNet((s_dim + a_dim), 200, 200, output_activation=None, norm_in=True)
+        # input (num_agents, batch, 200) output (num_agents, batch, num_agents * 2)\
+        self.comm_net = LSTMNet(200, n_agents, num_layers=1)
+        # input (batch, 2) output (batch, a_dim)
+        self.post_dense = DenseNet(6, 32, 1, output_activation=None)
 
     def forward(self, x_n, a_n):
-        x = x_n.reshape(-1, self.s_dim * self.num_agent)
-        a = a_n.reshape(-1, self.a_dim * self.num_agent)
-        x = self.norm1(x)
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = torch.cat([x, a], 1)
-        x = self.fc2(x)
-        x = self.relu(x)
-        x = self.fc3(x)
+        x = torch.cat((x_n, a_n), dim=-1)
+        x = x.view(-1, (self.s_dim + self.a_dim))
+        x = self.prev_dense(x)
+        x = x.reshape(-1, self.n_agents, 200)
+        x = self.comm_net(x)
+        x = x.reshape(-1, 6)
+        x = self.post_dense(x)
+        x = x.view(-1, self.n_agents, 1)
         return x
-
 
 
 class DenseNet(nn.Module):
@@ -98,8 +95,8 @@ class LSTMNet(nn.Module):
                  num_layers=1,
                  bias=True,
                  batch_fisrt=True,
-                 dropout=False,
                  bidirectional=True):
+        super(LSTMNet, self).__init__()
 
         self.lstm = nn.LSTM(
             input_size=input_size,
@@ -107,11 +104,9 @@ class LSTMNet(nn.Module):
             num_layers=num_layers,
             bias=bias,
             batch_first=batch_fisrt,
-            dropout=dropout,
             bidirectional=bidirectional
         )
 
-    def forward(self, input, wh, wc):
-        output, (hidden, cell) = self.lstm(input, (wh, wc))
-
+    def forward(self, input, wh=None, wc=None):
+        output, (hidden, cell) = self.lstm(input)
         return output
