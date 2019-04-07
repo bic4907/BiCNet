@@ -102,11 +102,11 @@ class BiCNet():
 
         state_batches = torch.Tensor(state_batches).to(self.device)
         action_batches = torch.Tensor(action_batches).to(self.device)
-        reward_batches = torch.Tensor(reward_batches).view(-1, self.n_agents, 1).to(self.device)
+        reward_batches = torch.Tensor(reward_batches).reshape(self.config.batch_size, self.n_agents, 1).to(self.device)
         next_state_batches = torch.Tensor(next_state_batches).to(self.device)
-        done_batches = torch.Tensor((done_batches == False) * 1).view(-1, self.n_agents, 1).to(self.device)
+        done_batches = torch.Tensor((done_batches == False) * 1).reshape(self.config.batch_size, self.n_agents, 1).to(self.device)
 
-        target_next_actions = self.policy_target.forward(next_state_batches).detach()
+        target_next_actions = self.policy_target.forward(next_state_batches)
         target_next_q = self.critic_target.forward(next_state_batches, target_next_actions)
         main_q = self.critic(state_batches, action_batches)
 
@@ -133,7 +133,7 @@ class BiCNet():
         # Actor Loss
         self.policy.zero_grad()
         clear_action_batches = self.policy.forward(state_batches)
-        loss_actor = (-self.critic.forward(state_batches, clear_action_batches)).mean()
+        loss_actor = -self.critic.forward(state_batches, clear_action_batches).mean()
         loss_actor += (clear_action_batches ** 2).mean() * 1e-3
         loss_actor.backward()
         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)

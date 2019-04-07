@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 
 from utils import weight_init
+from utils import fanin_init
 
-HIDDEN_DIM = 200
+HIDDEN_DIM = 300
 
 
 class Actor(nn.Module):
@@ -20,7 +21,7 @@ class Actor(nn.Module):
         # input (num_agents, batch, 200) output (num_agents, batch, num_agents * 2)\
         self.comm_net = LSTMNet(HIDDEN_DIM, HIDDEN_DIM, num_layers=1)
         # input (batch, 2) output (batch, a_dim)
-        self.post_dense = DenseNet(HIDDEN_DIM * 2, HIDDEN_DIM, a_dim, output_activation=nn.Tanh)
+        self.post_dense = DenseNet(HIDDEN_DIM * 2, HIDDEN_DIM // 2, a_dim, output_activation=nn.Tanh)
 
     def forward(self, x):
         x = x.view(-1, self.s_dim)
@@ -52,9 +53,11 @@ class Critic(nn.Module):
         x = torch.cat((x_n, a_n), dim=-1)
         x = x.view(-1, (self.s_dim + self.a_dim))
         x = self.prev_dense(x)
+
         x = x.reshape(-1, self.n_agents, HIDDEN_DIM)
         x = self.comm_net(x)
         x = x.reshape(-1, HIDDEN_DIM * 2)
+
         x = self.post_dense(x)
         x = x.view(-1, self.n_agents, 1)
         return x
@@ -68,11 +71,17 @@ class DenseNet(nn.Module):
 
         if self._norm_in:
             self.norm1 = nn.BatchNorm1d(s_dim)
+            self.norm2 = nn.BatchNorm1d(hidden_dim)
+            self.norm3 = nn.BatchNorm1d(hidden_dim)
+            self.norm4 = nn.BatchNorm1d(hidden_dim)
 
-        self.dense1 = nn.Linear(s_dim, hidden_dim // 2)
-        self.dense2 = nn.Linear(hidden_dim // 2, hidden_dim)
-        self.dense3 = nn.Linear(hidden_dim, hidden_dim // 2)
-        self.dense4 = nn.Linear(hidden_dim // 2, a_dim)
+        self.dense1 = nn.Linear(s_dim, hidden_dim)
+        self.dense1.weight.data = fanin_init(self.dense1.weight.data.size())
+        self.dense2 = nn.Linear(hidden_dim, hidden_dim)
+        self.dense2.weight.data = fanin_init(self.dense2.weight.data.size())
+        self.dense3 = nn.Linear(hidden_dim, hidden_dim)
+        self.dense3.weight.data.uniform_(-0.003, 0.003)
+        self.dense4 = nn.Linear(hidden_dim, a_dim)
 
         if hidden_activation:
             self.hidden_activation = hidden_activation()
@@ -85,11 +94,15 @@ class DenseNet(nn.Module):
             self.output_activation = lambda x : x
 
     def forward(self, x):
-        if self._norm_in:
-            x = self.norm1(x)
+        use_norm = True if (self._norm_in and x.shape[0] != 1) else False
+
+        if use_norm: x = self.norm1(x)
         x = self.hidden_activation(self.dense1(x))
+        if use_norm: x = self.norm2(x)
         x = self.hidden_activation(self.dense2(x))
+        if use_norm: x = self.norm3(x)
         x = self.hidden_activation(self.dense3(x))
+        if use_norm: x = self.norm4(x)
         x = self.output_activation(self.dense4(x))
         return x
 
