@@ -31,28 +31,37 @@ class BiCNet():
         hard_update(self.policy, self.policy_target)
         hard_update(self.critic, self.critic_target)
 
-        self.random_process = OrnsteinUhlenbeckProcess(size=self.a_dim, theta=self.config.ou_theta, mu=self.config.ou_mu, sigma=self.config.ou_sigma)
+        self.random_process = OrnsteinUhlenbeckProcess(size=self.a_dim,
+                                                       theta=self.config.ou_theta,
+                                                       mu=self.config.ou_mu,
+                                                       sigma=self.config.ou_sigma)
         self.replay_buffer = list()
         self.epsilon = 1.
         self.depsilon = self.epsilon / self.config.epsilon_decay
 
         self.c_loss = None
         self.a_loss = None
+        self.action_log = list()
 
     def choose_action(self, obs, noisy=True):
         obs = torch.Tensor([obs]).to(self.device)
 
         action = self.policy(obs).cpu().detach().numpy()[0]
+        self.action_log.append(action)
+
         if noisy:
             for agent_idx in range(self.n_agents):
-                action[agent_idx] += max(self.epsilon, 0.001) * self.random_process.sample()
+                pass
+                # action[agent_idx] += self.epsilon * self.random_process.sample()
             self.epsilon -= self.depsilon
+            self.epsilon = max(self.epsilon, 0.001)
         np.clip(action, -1., 1.)
 
         return action
 
     def reset(self):
         self.random_process.reset_states()
+        self.action_log.clear()
 
     def prep_train(self):
         self.policy.train()
@@ -65,7 +74,6 @@ class BiCNet():
         self.critic.eval()
         self.policy_target.eval()
         self.critic_target.eval()
-
 
     def random_action(self):
         return np.random.uniform(low=-1, high=1, size=(self.n_agents, 2))
@@ -85,9 +93,11 @@ class BiCNet():
         next_state_batches = np.array([_[3] for _ in experiences])
         done_batches = np.array([_[4] for _ in experiences])
 
+
         return state_batches, action_batches, reward_batches, next_state_batches, done_batches
 
     def train(self):
+
         state_batches, action_batches, reward_batches, next_state_batches, done_batches = self.get_batches()
 
         state_batches = torch.Tensor(state_batches).to(self.device)
@@ -97,23 +107,36 @@ class BiCNet():
         done_batches = torch.Tensor((done_batches == False) * 1).view(-1, self.n_agents, 1).to(self.device)
 
         target_next_actions = self.policy_target.forward(next_state_batches).detach()
-        target_next_q = self.critic_target.forward(next_state_batches, target_next_actions).detach()
-
+        target_next_q = self.critic_target.forward(next_state_batches, target_next_actions)
         main_q = self.critic(state_batches, action_batches)
+
+        '''
+        How to concat each agent's Q value?
+        '''
+        #target_next_q = target_next_q
+        #main_q = main_q.mean(dim=1)
+
+
+        '''
+        Reward Norm
+        '''
+        # reward_batches = (reward_batches - reward_batches.mean(dim=0)) / reward_batches.std(dim=0) / 1024
 
         # Critic Loss
         self.critic.zero_grad()
         baselines = reward_batches + done_batches * self.config.gamma * target_next_q
-        loss_critic = torch.nn.MSELoss()(main_q, baselines.cuda())
+        loss_critic = torch.nn.MSELoss()(main_q, baselines.detach())
         loss_critic.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
         self.critic_optimizer.step()
 
-        # TODO Edit Actor Loss
         # Actor Loss
         self.policy.zero_grad()
         clear_action_batches = self.policy.forward(state_batches)
         loss_actor = (-self.critic.forward(state_batches, clear_action_batches)).mean()
+        loss_actor += (clear_action_batches ** 2).mean() * 1e-3
         loss_actor.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
         self.policy_optimizer.step()
 
         # This is for logging
@@ -125,3 +148,6 @@ class BiCNet():
 
     def get_loss(self):
         return self.c_loss, self.a_loss
+
+    def get_action_std(self):
+        return np.array(self.action_log).std(axis=-1).mean()

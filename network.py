@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 
+from utils import weight_init
+
+HIDDEN_DIM = 200
+
 
 class Actor(nn.Module):
     def __init__(self, s_dim, a_dim, n_agents):
@@ -11,19 +15,19 @@ class Actor(nn.Module):
         self.n_agents = n_agents
 
         # input (batch, s_dim) output (batch, 300)
-        self.prev_dense = DenseNet(s_dim, 200, 200, output_activation=None, norm_in=True)
+
+        self.prev_dense = DenseNet(s_dim, HIDDEN_DIM // 2, HIDDEN_DIM, output_activation=None, norm_in=True)
         # input (num_agents, batch, 200) output (num_agents, batch, num_agents * 2)\
-        self.comm_net = LSTMNet(200, n_agents, num_layers=1)
+        self.comm_net = LSTMNet(HIDDEN_DIM, HIDDEN_DIM, num_layers=1)
         # input (batch, 2) output (batch, a_dim)
-        self.post_dense = DenseNet(6, 32, a_dim, output_activation=nn.Tanh)
+        self.post_dense = DenseNet(HIDDEN_DIM * 2, HIDDEN_DIM, a_dim, output_activation=nn.Tanh)
 
     def forward(self, x):
-
         x = x.view(-1, self.s_dim)
         x = self.prev_dense(x)
-        x = x.reshape(-1, self.n_agents, 200)
+        x = x.reshape(-1, self.n_agents, HIDDEN_DIM)
         x = self.comm_net(x)
-        x = x.reshape(-1, 6)
+        x = x.reshape(-1, HIDDEN_DIM * 2)
         x = self.post_dense(x)
         x = x.view(-1, self.n_agents, self.a_dim)
         return x
@@ -38,19 +42,19 @@ class Critic(nn.Module):
         self.n_agents = n_agents
 
         # input (batch, s_dim) output (batch, 300)
-        self.prev_dense = DenseNet((s_dim + a_dim), 200, 200, output_activation=None, norm_in=True)
+        self.prev_dense = DenseNet((s_dim + a_dim), HIDDEN_DIM // 2, HIDDEN_DIM, output_activation=None, norm_in=True)
         # input (num_agents, batch, 200) output (num_agents, batch, num_agents * 2)\
-        self.comm_net = LSTMNet(200, n_agents, num_layers=1)
+        self.comm_net = LSTMNet(HIDDEN_DIM, HIDDEN_DIM, num_layers=1)
         # input (batch, 2) output (batch, a_dim)
-        self.post_dense = DenseNet(6, 32, 1, output_activation=None)
+        self.post_dense = DenseNet(HIDDEN_DIM * 2, HIDDEN_DIM, 1, output_activation=None)
 
     def forward(self, x_n, a_n):
         x = torch.cat((x_n, a_n), dim=-1)
         x = x.view(-1, (self.s_dim + self.a_dim))
         x = self.prev_dense(x)
-        x = x.reshape(-1, self.n_agents, 200)
+        x = x.reshape(-1, self.n_agents, HIDDEN_DIM)
         x = self.comm_net(x)
-        x = x.reshape(-1, 6)
+        x = x.reshape(-1, HIDDEN_DIM * 2)
         x = self.post_dense(x)
         x = x.view(-1, self.n_agents, 1)
         return x
@@ -65,10 +69,10 @@ class DenseNet(nn.Module):
         if self._norm_in:
             self.norm1 = nn.BatchNorm1d(s_dim)
 
-        self.dense1 = nn.Linear(s_dim, hidden_dim)
-        self.dense2 = nn.Linear(hidden_dim, hidden_dim)
-        self.dense3 = nn.Linear(hidden_dim, hidden_dim)
-        self.dense4 = nn.Linear(hidden_dim, a_dim)
+        self.dense1 = nn.Linear(s_dim, hidden_dim // 2)
+        self.dense2 = nn.Linear(hidden_dim // 2, hidden_dim)
+        self.dense3 = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.dense4 = nn.Linear(hidden_dim // 2, a_dim)
 
         if hidden_activation:
             self.hidden_activation = hidden_activation()
