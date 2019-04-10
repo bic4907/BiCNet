@@ -35,6 +35,10 @@ def main(args):
         episode += 1
         step = 0
         accum_reward = 0
+        rewardA = 0
+        rewardB = 0
+        rewardC = 0
+
         prev_reward = np.zeros((3), dtype=np.float32)
 
         while True:
@@ -62,6 +66,9 @@ def main(args):
             #     rew1 -= 0.1
             reward = rew1 + (np.array(reward, dtype=np.float32) / 100.)
             accum_reward += sum(reward)
+            rewardA += reward[0]
+            rewardB += reward[1]
+            rewardC += reward[2]
 
             if args.render and episode % 100 == 0:
                 env.render(mode='rgb_array')
@@ -80,6 +87,9 @@ def main(args):
                 print("[Episode %05d] reward %6.4f eps %.4f" % (episode, accum_reward, model.epsilon), end='')
                 if args.tensorboard:
                     writer.add_scalar(tag='agent/reward', global_step=episode, scalar_value=accum_reward.item())
+                    writer.add_scalar(tag='agent/reward_0', global_step=episode, scalar_value=rewardA.item())
+                    writer.add_scalar(tag='agent/reward_1', global_step=episode, scalar_value=rewardB.item())
+                    writer.add_scalar(tag='agent/reward_2', global_step=episode, scalar_value=rewardC.item())
                     writer.add_scalar(tag='agent/epsilon', global_step=episode, scalar_value=model.epsilon)
                     if c_loss and a_loss:
                         writer.add_scalars('agent/loss', global_step=episode, tag_scalar_dict={'actor':a_loss, 'critic':c_loss})

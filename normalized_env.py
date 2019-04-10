@@ -44,18 +44,28 @@ def reward_from_state(n_state):
     rew = []
 
     for state in n_state:
+
         obs_landmark = np.array(state[4:10])
         agent_reward = 0
-        for i in range(1):
+        for i in range(3):
 
             sub_obs = obs_landmark[i*2: i*2+2]
             dist = np.sqrt(sub_obs[0]**2 + sub_obs[1]**2)
 
-            if dist < 0.4: agent_reward += 0.3
-            if dist < 0.2: agent_reward += 0.8
+            # if dist < 0.4: agent_reward += 0.3
+            if dist < 0.2: agent_reward += 0.5
             if dist < 0.1: agent_reward += 1.
 
+
+        otherA = np.array(state[10:12])
+        otherB = np.array(state[12:14])
+        dist = np.sqrt(otherA[0] ** 2 + otherA[1] ** 2)
+        if dist < 3.1:  agent_reward -= 0.25
+        dist = np.sqrt(otherB[0] ** 2 + otherB[1] ** 2)
+        if dist < 3.1:  agent_reward -= 0.25
+
         rew.append(agent_reward)
+
     return rew
 
 '''
